@@ -23,8 +23,10 @@ public sealed class CdpBrowserBridge : IBrowserBridge
     private readonly ConcurrentDictionary<string, AccountSession> _sessions = new();
     private readonly SemaphoreSlim _connectLock = new(1, 1);
 
-    public int ReplyTimeoutSeconds { get; set; } = 180;
-    public int DomFallbackKickInMs { get; set; } = 2200;
+    public int ReplyTimeoutSeconds { get; set; } = 240;
+    public int DomFallbackKickInMs { get; set; } = 1800;
+    public int NewChatReadyPollIntervalMs { get; set; } = 300;
+    public int NewChatReadyMaxPolls { get; set; } = 20;
 
     public event Action<string, BridgeStatusSnapshot>? StatusChanged;
 
@@ -72,12 +74,97 @@ public sealed class CdpBrowserBridge : IBrowserBridge
             return EmitStatus(
                 account.Id,
                 BridgeConnectionState.WaitingForLogin,
-                "已连接页面，等待进入 Copilot 聊天界面（如已打开可点击“校准输入框”）",
+                "已连接页面，等待进入 Copilot 聊天界面（如已打开可在设置中点击“校准输入框”）",
                 probe.PageUrl);
         }
         catch (Exception ex)
         {
             return EmitStatus(account.Id, BridgeConnectionState.Error, $"连接失败: {ex.Message}");
+        }
+    }
+
+    public async Task<BridgeStatusSnapshot> StartNewConversationAsync(
+        AccountProfile account,
+        CancellationToken cancellationToken = default)
+    {
+        EmitStatus(account.Id, BridgeConnectionState.Launching, $"正在连接 {account.DisplayName} 并开启新对话...");
+
+        try
+        {
+            var session = await GetOrConnectSessionAsync(account, cancellationToken).ConfigureAwait(false);
+            var rule = _adapterManager.GetRule(account.Edition);
+            var startUrl = _adapterManager.GetEffectiveStartUrl(account);
+
+            var (initialProbe, _) = await SemanticInputAndCalibrator.ProbeAndFocusInputAsync(
+                session.Client,
+                account,
+                rule,
+                focusAndClear: false,
+                cancellationToken).ConfigureAwait(false);
+
+            session.LastPageUrl = initialProbe.PageUrl;
+            if (initialProbe.IsLoginPage)
+            {
+                return EmitStatus(account.Id, BridgeConnectionState.WaitingForLogin, "请在打开的浏览器窗口中登录 Copilot 账号", initialProbe.PageUrl);
+            }
+
+            var clickedNewChat = await SemanticInputAndCalibrator.TryClickNewChatAsync(
+                session.Client,
+                rule,
+                cancellationToken).ConfigureAwait(false);
+
+            if (!clickedNewChat && !string.IsNullOrWhiteSpace(startUrl))
+            {
+                try
+                {
+                    await session.Client.SendCommandAsync(
+                        "Page.navigate",
+                        new { url = startUrl },
+                        null,
+                        cancellationToken,
+                        timeoutMs: 6000).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Best-effort navigation fallback
+                }
+            }
+
+            // Wait briefly for the fresh chat composer to mount and become interactive
+            for (var i = 0; i < Math.Max(1, NewChatReadyMaxPolls); i++)
+            {
+                var (probe, _) = await SemanticInputAndCalibrator.ProbeAndFocusInputAsync(
+                    session.Client,
+                    account,
+                    rule,
+                    focusAndClear: false,
+                    cancellationToken).ConfigureAwait(false);
+
+                session.LastPageUrl = probe.PageUrl;
+                if (probe.Found)
+                {
+                    return EmitStatus(account.Id, BridgeConnectionState.Ready, "已开启新对话并就绪", probe.PageUrl);
+                }
+                if (probe.IsLoginPage)
+                {
+                    return EmitStatus(account.Id, BridgeConnectionState.WaitingForLogin, "请在浏览器中登录 Copilot 账号", probe.PageUrl);
+                }
+
+                if (NewChatReadyPollIntervalMs > 0)
+                {
+                    await Task.Delay(NewChatReadyPollIntervalMs, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            return EmitStatus(
+                account.Id,
+                BridgeConnectionState.WaitingForLogin,
+                "等待 Copilot 聊天输入框加载完成...",
+                session.LastPageUrl);
+        }
+        catch (Exception ex)
+        {
+            return EmitStatus(account.Id, BridgeConnectionState.Error, $"开启新对话失败: {ex.Message}");
         }
     }
 
@@ -90,7 +177,7 @@ public sealed class CdpBrowserBridge : IBrowserBridge
             var existingTarget = await _profileManager.TryGetExistingPageTargetAsync(account, cancellationToken).ConfigureAwait(false);
             if (existingTarget is null)
             {
-                return EmitStatus(account.Id, BridgeConnectionState.Disconnected, "浏览器未启动");
+                return EmitStatus(account.Id, BridgeConnectionState.Disconnected, "未连接（点击“新建对话”或直接发送即可自动连接）");
             }
             return await EnsureConnectedAsync(account, cancellationToken).ConfigureAwait(false);
         }
@@ -113,7 +200,7 @@ public sealed class CdpBrowserBridge : IBrowserBridge
             return EmitStatus(
                 account.Id,
                 BridgeConnectionState.WaitingForLogin,
-                probe.IsLoginPage ? "等待浏览器登录" : "未检测到聊天输入框",
+                probe.IsLoginPage ? "等待浏览器登录" : "等待进入聊天页",
                 probe.PageUrl);
         }
         catch
@@ -156,7 +243,7 @@ public sealed class CdpBrowserBridge : IBrowserBridge
         {
             var hint = probe.IsLoginPage
                 ? "当前处于登录页，请先在浏览器中登录 Copilot 账号。"
-                : "未找到 Copilot 聊天输入框，请确认页面已加载完成，或点击顶部「校准输入框」完成 3 秒自愈校准。";
+                : "未找到 Copilot 聊天输入框，请确认页面已加载完成，或在「⚙️ 设置」中点击「校准输入框」完成 3 秒自愈校准。";
             EmitStatus(account.Id, BridgeConnectionState.WaitingForLogin, hint, probe.PageUrl);
             throw new InvalidOperationException(hint);
         }
@@ -349,7 +436,8 @@ public sealed class CdpBrowserBridge : IBrowserBridge
             else if (!snap.IsGenerating)
             {
                 stableCycles++;
-                if (stableCycles >= 3) // ~1.05s stable & Stop button gone
+                var requiredCycles = LooksLikeIncompleteCodeBlock(lastText) ? 8 : 4;
+                if (stableCycles >= requiredCycles)
                 {
                     return lastText;
                 }
@@ -357,6 +445,18 @@ public sealed class CdpBrowserBridge : IBrowserBridge
         }
 
         return await networkReplyTask.ConfigureAwait(false);
+    }
+
+    private static bool LooksLikeIncompleteCodeBlock(string text)
+    {
+        var fenceCount = 0;
+        var idx = 0;
+        while ((idx = text.IndexOf("```", idx, StringComparison.Ordinal)) >= 0)
+        {
+            fenceCount++;
+            idx += 3;
+        }
+        return (fenceCount % 2) != 0;
     }
 
     private BridgeStatusSnapshot EmitStatus(

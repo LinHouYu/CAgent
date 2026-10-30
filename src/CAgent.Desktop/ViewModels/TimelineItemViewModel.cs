@@ -120,6 +120,7 @@ public sealed class TimelineItemViewModel : ViewModelBase
         ToolApprovalStatus.ExecutedSuccess => "✓ 执行成功",
         ToolApprovalStatus.ExecutedFailed => "✕ 执行失败",
         ToolApprovalStatus.Rejected => "⊘ 已拒绝",
+        ToolApprovalStatus.BlockedByPlanMode => "🛡️ 规划模式已拦截",
         _ => string.Empty
     };
 

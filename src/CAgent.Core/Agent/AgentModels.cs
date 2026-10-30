@@ -29,7 +29,8 @@ public enum ToolApprovalStatus
     ApprovedExecuting,
     ExecutedSuccess,
     ExecutedFailed,
-    Rejected
+    Rejected,
+    BlockedByPlanMode
 }
 
 public sealed class TimelineEntry

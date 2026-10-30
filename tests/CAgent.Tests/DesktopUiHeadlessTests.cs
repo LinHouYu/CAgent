@@ -107,7 +107,11 @@ public sealed class DesktopUiHeadlessTests : IDisposable
     {
         var configPath = Path.Combine(_tempDir, "ui_timeline.json");
         using var cfgSvc = new ConfigService(configPath);
-        cfgSvc.Update(c => c.LastWorkspacePath = _tempDir);
+        cfgSvc.Update(c =>
+        {
+            c.LastWorkspacePath = _tempDir;
+            c.AutoApproveTools = false; // Explicitly test manual approval UI card
+        });
 
         var bridge = new SingleToolMockBridge();
         var orch = new AgentOrchestrator(cfgSvc, bridge, BuiltInTools.CreateDefaultRegistry(), (_, _) => 0);
@@ -148,11 +152,64 @@ public sealed class DesktopUiHeadlessTests : IDisposable
     }
 
     [AvaloniaFact]
+    public async Task StreamlinedUi_OneClickNewChat_PlanExecuteModeToggle_AndEmptyWorkspaceGuard_WorkCleanly()
+    {
+        var configPath = Path.Combine(_tempDir, "ui_v2_modes.json");
+
+        using (var cfgSvc1 = new ConfigService(configPath))
+        {
+            var bridge1 = new SingleToolMockBridge();
+            var orch1 = new AgentOrchestrator(cfgSvc1, bridge1, BuiltInTools.CreateDefaultRegistry(), (_, _) => 0);
+            var vm1 = new MainWindowViewModel(cfgSvc1, bridge1, orch1);
+            var window1 = new MainWindow(cfgSvc1) { DataContext = vm1 };
+            window1.Show();
+
+            // 1. Default v0.2 mode is Execute + AutoApproveTools=true
+            Assert.True(vm1.IsExecuteMode);
+            Assert.False(vm1.IsPlanMode);
+            Assert.True(vm1.AutoApproveTools);
+
+            // 2. Empty workspace guard prevents accidental writes into app folder
+            vm1.WorkspacePath = string.Empty;
+            await vm1.StartNewChatAsync();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.Contains(vm1.TimelineItems, t => t.Title.Contains("工作目录"));
+
+            // 3. Pasting Windows Explorer "Copy as path" quoted folder strips quotes cleanly
+            vm1.WorkspacePath = $"  \"{_tempDir}\"  ";
+            Assert.Equal(_tempDir, vm1.WorkspacePath);
+
+            // 4. One-click StartNewChat automatically injects prompt & executes tool continuously
+            await vm1.StartNewChatAsync();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.Contains(vm1.TimelineItems, t => t.ApprovalStatus == ToolApprovalStatus.ExecutedSuccess);
+
+            // 5. Switch to Plan Mode and verify persistence across restart
+            vm1.SwitchToPlanModeCommand.Execute(null);
+            Assert.True(vm1.IsPlanMode);
+            Assert.Contains("仅允许只读查看", vm1.ModeHintText);
+
+            window1.Close();
+        }
+
+        using var cfgSvc2 = new ConfigService(configPath);
+        var vm2 = new MainWindowViewModel(
+            cfgSvc2,
+            new NoOpBridge(),
+            new AgentOrchestrator(cfgSvc2, new NoOpBridge(), BuiltInTools.CreateDefaultRegistry()));
+        Assert.True(vm2.IsPlanMode);
+        Assert.Equal(_tempDir, vm2.WorkspacePath);
+    }
+
+    [AvaloniaFact]
     public async Task MainWindow_RendersSkiaFrames_InDarkAndLightThemes()
     {
         var configPath = Path.Combine(_tempDir, "ui_render.json");
+        var demoWs = Path.Combine(_tempDir, "DemoWorkspace");
+        Directory.CreateDirectory(demoWs);
+
         using var cfgSvc = new ConfigService(configPath);
-        cfgSvc.Update(c => c.LastWorkspacePath = @"C:\Projects\DemoWorkspace");
+        cfgSvc.Update(c => c.LastWorkspacePath = demoWs);
 
         var bridge = new SingleToolMockBridge();
         var orch = new AgentOrchestrator(cfgSvc, bridge, BuiltInTools.CreateDefaultRegistry(), (_, _) => 0);
@@ -161,14 +218,11 @@ public sealed class DesktopUiHeadlessTests : IDisposable
         var window = new MainWindow(cfgSvc) { DataContext = vm };
         window.Show();
 
-        vm.PromptInputText = "帮我扫描当前工作目录并创建部署检查清单";
-        _ = vm.SendPromptAsync();
-        for (var i = 0; i < 30 && !vm.TimelineItems.Any(t => t.IsPendingApproval); i++)
-        {
-            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-            await Task.Delay(20);
-        }
-        vm.IsSettingsExpanded = true;
+        // Render Dark Theme: clean streamlined top bar + completed autonomous tool loop + Execute mode bar
+        vm.PromptInputText = "帮我做一个翻译工具网页并自动打开截图检查界面效果";
+        await vm.SendPromptAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        await Task.Delay(30);
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 
         using var darkFrame = window.CaptureRenderedFrame();
@@ -181,10 +235,13 @@ public sealed class DesktopUiHeadlessTests : IDisposable
             darkFrame.Save(Path.Combine(previewDir, "cagent_dark_ui.png"));
         }
 
+        // Render Light Theme: Work M365 edition + Plan Mode active + expanded Settings drawer
         vm.SwitchToWorkCommand.Execute(null);
-        vm.ToggleAddAccountPanelCommand.Execute(null);
-        vm.NewAccountName = "企业研发部 M365";
+        vm.SwitchToPlanModeCommand.Execute(null);
+        vm.IsSettingsExpanded = true;
         vm.IsDarkMode = false;
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        await Task.Delay(30);
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 
         using var lightFrame = window.CaptureRenderedFrame();

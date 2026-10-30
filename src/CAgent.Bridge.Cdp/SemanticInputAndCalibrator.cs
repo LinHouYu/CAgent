@@ -72,6 +72,87 @@ internal static class SemanticInputAndCalibrator
         return (bestProbe ?? new InputProbeResult(), bestSession);
     }
 
+    public static async Task<bool> TryClickNewChatAsync(
+        PersistentCdpClient client,
+        EditionAdapterRule rule,
+        CancellationToken ct)
+    {
+        var hintsJson = JsonSerializer.Serialize(rule.NewChatButtonHints ?? []);
+        var clickNewChatJs = $$"""
+        (function() {
+            const hints = {{hintsJson}};
+            function collectRoots(root, list) {
+                list.push(root);
+                const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+                let n = walker.currentNode;
+                while (n) {
+                    if (n.shadowRoot) collectRoots(n.shadowRoot, list);
+                    if (n.tagName === 'IFRAME') {
+                        try { if (n.contentDocument) collectRoots(n.contentDocument, list); } catch {}
+                    }
+                    n = walker.nextNode();
+                }
+            }
+            const roots = [];
+            collectRoots(document, roots);
+
+            function isClickable(el) {
+                if (!el || el.disabled || el.getAttribute?.('aria-disabled') === 'true') return false;
+                const r = el.getBoundingClientRect();
+                return r.width > 8 && r.height > 8;
+            }
+
+            for (const sel of hints) {
+                for (const root of roots) {
+                    try {
+                        const matches = root.querySelectorAll(sel);
+                        for (const newChatEl of matches) {
+                            if (isClickable(newChatEl)) {
+                                newChatEl.click();
+                                return true;
+                            }
+                        }
+                    } catch {}
+                }
+            }
+
+            // Semantic fallback: match visible button/link labeled New chat / 新聊天 / 新建聊天 / 新对话
+            for (const root of roots) {
+                const buttons = root.querySelectorAll('button, a[role="button"], [role="button"]');
+                for (const newChatEl of buttons) {
+                    if (!isClickable(newChatEl)) continue;
+                    const label = `${newChatEl.getAttribute('aria-label')||''} ${newChatEl.getAttribute('title')||''} ${(newChatEl.innerText||'').trim()}`;
+                    if (/^(new chat|new topic|start new chat|新聊天|新建聊天|新对话|开启新对话)$/i.test(label.trim())) {
+                        newChatEl.click();
+                        return true;
+                    }
+                }
+            }
+            return false;
+        })()
+        """;
+
+        foreach (var sid in BuildSessionSearchOrder(client, null))
+        {
+            try
+            {
+                var clicked = await client.EvaluateJsAsync<bool>(clickNewChatJs, sid, cancellationToken: ct, timeoutMs: 3000)
+                    .ConfigureAwait(false);
+                if (clicked)
+                {
+                    await Task.Delay(350, ct).ConfigureAwait(false);
+                    return true;
+                }
+            }
+            catch
+            {
+                // Try next frame
+            }
+        }
+
+        return false;
+    }
+
     public static async Task AttachFilesAsync(
         PersistentCdpClient client,
         string? activeSessionId,
@@ -89,6 +170,8 @@ internal static class SemanticInputAndCalibrator
         {
             return;
         }
+
+        var attachedViaFileInput = false;
 
         // Strategy 1: Native CDP DOM.setFileInputFiles (piercing Shadow DOM)
         var sessions = activeSessionId is not null
@@ -120,9 +203,9 @@ internal static class SemanticInputAndCalibrator
                             new { files = fullPaths, objectId },
                             sid,
                             ct,
-                            timeoutMs: 5000).ConfigureAwait(false);
-                        await Task.Delay(600, ct).ConfigureAwait(false);
-                        return;
+                            timeoutMs: 6000).ConfigureAwait(false);
+                        attachedViaFileInput = true;
+                        break;
                     }
                 }
             }
@@ -133,30 +216,81 @@ internal static class SemanticInputAndCalibrator
         }
 
         // Strategy 2: Synthetic Clipboard Paste Event onto active focused input (works universally on Copilot Web!)
-        foreach (var path in fullPaths)
+        if (!attachedViaFileInput)
         {
-            var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
-            var b64 = Convert.ToBase64String(bytes);
-            var fileName = Path.GetFileName(path);
-            var mime = GuessMimeType(path);
+            foreach (var path in fullPaths)
+            {
+                try
+                {
+                    var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
+                    var b64 = Convert.ToBase64String(bytes);
+                    var fileName = Path.GetFileName(path);
+                    var mime = GuessMimeType(path);
 
-            var pasteJs = $$"""
-            (function() {
-                const target = document.activeElement || document.body;
-                const bin = atob({{JsonSerializer.Serialize(b64)}});
-                const arr = new Uint8Array(bin.length);
-                for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-                const file = new File([arr], {{JsonSerializer.Serialize(fileName)}}, { type: {{JsonSerializer.Serialize(mime)}} });
-                const dt = new DataTransfer();
-                dt.items.add(file);
-                const evt = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
-                target.dispatchEvent(evt);
-                return true;
-            })()
-            """;
+                    var pasteJs = $$"""
+                    (function() {
+                        const target = document.activeElement || document.body;
+                        const bin = atob({{JsonSerializer.Serialize(b64)}});
+                        const arr = new Uint8Array(bin.length);
+                        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+                        const file = new File([arr], {{JsonSerializer.Serialize(fileName)}}, { type: {{JsonSerializer.Serialize(mime)}} });
+                        const dt = new DataTransfer();
+                        dt.items.add(file);
+                        const evt = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
+                        target.dispatchEvent(evt);
+                        return true;
+                    })()
+                    """;
 
-            await client.EvaluateJsAsync<bool>(pasteJs, activeSessionId, cancellationToken: ct).ConfigureAwait(false);
-            await Task.Delay(500, ct).ConfigureAwait(false);
+                    await client.EvaluateJsAsync<bool>(pasteJs, activeSessionId, cancellationToken: ct, timeoutMs: 6000)
+                        .ConfigureAwait(false);
+                    await Task.Delay(400, ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Best-effort per-file paste so message text never fails to send
+                }
+            }
+        }
+
+        // Wait until upload progress indicators settle before pressing Send
+        await WaitForAttachmentUploadReadyAsync(client, activeSessionId, ct).ConfigureAwait(false);
+    }
+
+    private static async Task WaitForAttachmentUploadReadyAsync(
+        PersistentCdpClient client,
+        string? sessionId,
+        CancellationToken ct)
+    {
+        const string checkUploadingJs = """
+        (function() {
+            const spinners = document.querySelectorAll('[role="progressbar"], [aria-busy="true"], [class*="uploading" i], [data-testid*="loading" i]');
+            for (const s of spinners) {
+                const r = s.getBoundingClientRect();
+                if (r.width > 4 && r.height > 4) return true;
+            }
+            return false;
+        })()
+        """;
+
+        await Task.Delay(650, ct).ConfigureAwait(false);
+
+        for (var i = 0; i < 12; i++)
+        {
+            try
+            {
+                var stillUploading = await client.EvaluateJsAsync<bool>(checkUploadingJs, sessionId, cancellationToken: ct, timeoutMs: 2000)
+                    .ConfigureAwait(false);
+                if (!stillUploading)
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                return;
+            }
+            await Task.Delay(300, ct).ConfigureAwait(false);
         }
     }
 
@@ -174,9 +308,9 @@ internal static class SemanticInputAndCalibrator
                 new { text = message },
                 sessionId,
                 ct,
-                timeoutMs: 8000).ConfigureAwait(false);
+                timeoutMs: 10000).ConfigureAwait(false);
 
-            await Task.Delay(180, ct).ConfigureAwait(false);
+            await Task.Delay(200, ct).ConfigureAwait(false);
         }
 
         // Try clicking an enabled Send button first, otherwise dispatch native Enter key
@@ -247,12 +381,26 @@ internal static class SemanticInputAndCalibrator
     {
         const string script = """
         (function() {
+            function extractRichText(el) {
+                let txt = (el.innerText || '').trim();
+                const pres = el.querySelectorAll ? el.querySelectorAll('pre') : [];
+                pres.forEach(pre => {
+                    const code = (pre.querySelector('code') || pre).innerText || '';
+                    const trimmed = code.trim();
+                    if (trimmed.startsWith('{') && trimmed.includes('"tool"') && !txt.includes('```cagent')) {
+                        txt += '\n```cagent\n' + trimmed + '\n```';
+                    }
+                });
+                return txt;
+            }
+            const rawList = Array.from(document.querySelectorAll('[data-content="ai-message"], [data-testid*="bot-message" i], [data-testid*="assistant" i], article, [role="article"], [class*="assistant"], [class*="bot"]'));
+            const topLevel = rawList.filter(el => !rawList.some(other => other !== el && other.contains(el)));
             const blocks = new Set();
-            document.querySelectorAll('article, [data-content], [class*="message"], [class*="response"], [role="article"], main div').forEach(el => {
-                const t = (el.innerText || '').trim();
+            topLevel.forEach(el => {
+                const t = extractRichText(el);
                 if (t.length > 0) blocks.add(t);
             });
-            window.__cagentBaselineCount = document.querySelectorAll('article, [data-content], [role="article"]').length;
+            window.__cagentBaselineCount = topLevel.length;
             window.__cagentBaselineTexts = Array.from(blocks);
             return true;
         })()
@@ -274,18 +422,32 @@ internal static class SemanticInputAndCalibrator
     {
         const string script = """
         (function() {
-            const stopBtns = document.querySelectorAll('button[aria-label*="Stop"], button[aria-label*="停止"], button[title*="Stop"], button[title*="停止"]');
+            const stopBtns = document.querySelectorAll('button[aria-label*="Stop" i], button[aria-label*="停止"], button[title*="Stop" i], button[title*="停止"], button[data-testid*="stop" i], [role="button"][aria-label*="Stop" i], [role="button"][aria-label*="停止"]');
             let isGenerating = false;
             stopBtns.forEach(b => {
                 const r = b.getBoundingClientRect();
                 if (r.width > 4 && r.height > 4 && !b.disabled) isGenerating = true;
             });
 
+            function extractRichText(el) {
+                let txt = (el.innerText || '').trim();
+                const pres = el.querySelectorAll ? el.querySelectorAll('pre') : [];
+                pres.forEach(pre => {
+                    const code = (pre.querySelector('code') || pre).innerText || '';
+                    const trimmed = code.trim();
+                    if (trimmed.startsWith('{') && trimmed.includes('"tool"') && !txt.includes('```cagent')) {
+                        txt += '\n```cagent\n' + trimmed + '\n```';
+                    }
+                });
+                return txt;
+            }
+
             const baseline = new Set(window.__cagentBaselineTexts || []);
-            const candidates = document.querySelectorAll('[data-content="ai-message"], article, [role="article"], [class*="assistant"], [class*="bot"], [class*="markdown"]');
+            const rawList = Array.from(document.querySelectorAll('[data-content="ai-message"], [data-testid*="bot-message" i], [data-testid*="assistant" i], article, [role="article"], [class*="assistant"], [class*="bot"]'));
+            const topLevel = rawList.filter(el => !rawList.some(other => other !== el && other.contains(el)));
             let latestText = '';
-            for (const el of candidates) {
-                const txt = (el.innerText || '').trim();
+            for (const el of topLevel) {
+                const txt = extractRichText(el);
                 if (txt.length > 0 && !baseline.has(txt)) {
                     latestText = txt;
                 }
@@ -613,6 +775,10 @@ internal static class SemanticInputAndCalibrator
             ".webp" => "image/webp",
             ".gif" => "image/gif",
             ".pdf" => "application/pdf",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             ".json" => "application/json",
             _ => "text/plain"
         };

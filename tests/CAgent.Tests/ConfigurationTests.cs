@@ -165,8 +165,46 @@ public sealed class ConfigurationTests : IDisposable
         var workRule = manager.GetRule(CopilotEdition.Work);
         Assert.Equal("https://copilot.cloud.microsoft/enterprise", workRule.DefaultStartUrl);
         Assert.Contains("#new-m365-editor", workRule.InputSelectorHints);
+        // v1 adapters.json without newChatButtonHints must auto-backfill NewChatButtonHints!
+        Assert.NotEmpty(workRule.NewChatButtonHints);
         // Personal rule remains intact
         Assert.Equal("https://copilot.microsoft.com", manager.GetRule(CopilotEdition.Personal).DefaultStartUrl);
+    }
+
+    [Fact]
+    public void LegacyV1Config_MigratesToV2AutonomousExecuteDefaults_WhilePreservingExplicitV2Settings()
+    {
+        var configPath = Path.Combine(_tempDir, "legacy_v1_config.json");
+        var legacyJson = """
+        {
+          "autoApproveTools": false,
+          "maxAutoSteps": 10,
+          "lastWorkspacePath": "C:\\Users\\Demo\\Work"
+        }
+        """;
+        File.WriteAllText(configPath, legacyJson, Encoding.UTF8);
+
+        // First load upgrades schema < 2 to AutoApproveTools=true, InteractionMode=Execute, MaxAutoSteps=25
+        using (var migrated = new ConfigService(configPath))
+        {
+            Assert.Equal(2, migrated.Current.ConfigSchemaVersion);
+            Assert.True(migrated.Current.AutoApproveTools);
+            Assert.Equal(AgentInteractionMode.Execute, migrated.Current.InteractionMode);
+            Assert.Equal(25, migrated.Current.MaxAutoSteps);
+
+            // User explicitly chooses Plan mode and manual tool approval on v2
+            migrated.Update(cfg =>
+            {
+                cfg.InteractionMode = AgentInteractionMode.Plan;
+                cfg.AutoApproveTools = false;
+            });
+        }
+
+        // Subsequent restart on v2 must preserve explicit user choices!
+        using var reopened = new ConfigService(configPath);
+        Assert.Equal(2, reopened.Current.ConfigSchemaVersion);
+        Assert.False(reopened.Current.AutoApproveTools);
+        Assert.Equal(AgentInteractionMode.Plan, reopened.Current.InteractionMode);
     }
 
     public void Dispose()

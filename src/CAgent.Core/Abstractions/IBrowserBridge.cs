@@ -26,6 +26,11 @@ public interface IBrowserBridge : IAsyncDisposable
         AccountProfile account,
         CancellationToken cancellationToken = default);
 
+    Task<BridgeStatusSnapshot> StartNewConversationAsync(
+        AccountProfile account,
+        CancellationToken cancellationToken = default) =>
+        EnsureConnectedAsync(account, cancellationToken);
+
     Task<BridgeStatusSnapshot> CheckStatusAsync(
         AccountProfile account,
         CancellationToken cancellationToken = default);

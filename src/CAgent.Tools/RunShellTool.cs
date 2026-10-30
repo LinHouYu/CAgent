@@ -18,10 +18,7 @@ public sealed class RunShellTool : ITool
             return ToolExecutionResult.Fail("缺少必填参数 'command'。");
         }
 
-        var workingDir = string.IsNullOrWhiteSpace(context.WorkspacePath) || !Directory.Exists(context.WorkspacePath)
-            ? Directory.GetCurrentDirectory()
-            : Path.GetFullPath(context.WorkspacePath);
-
+        var workingDir = ResolveAndEnsureWorkingDirectory(context.WorkspacePath);
         var psi = CreateCrossPlatformProcessStartInfo(command, workingDir);
 
         using var process = new Process { StartInfo = psi };
@@ -91,6 +88,7 @@ public sealed class RunShellTool : ITool
         lock (stderr) { errText = stderr.ToString().TrimEnd(); }
 
         var summary = new StringBuilder();
+        summary.AppendLine($"工作目录: {workingDir}");
         if (timedOut)
         {
             summary.AppendLine($"[命令执行超时 ({timeout.TotalSeconds:F0}s)，已强制终止进程树]");
@@ -121,6 +119,20 @@ public sealed class RunShellTool : ITool
         return new ToolExecutionResult(ok, summary.ToString().TrimEnd(), []);
     }
 
+    private static string ResolveAndEnsureWorkingDirectory(string? workspacePath)
+    {
+        if (!string.IsNullOrWhiteSpace(workspacePath))
+        {
+            var full = Path.GetFullPath(workspacePath);
+            if (!Directory.Exists(full))
+            {
+                Directory.CreateDirectory(full);
+            }
+            return full;
+        }
+        return Directory.GetCurrentDirectory();
+    }
+
     private static ProcessStartInfo CreateCrossPlatformProcessStartInfo(string command, string workingDir)
     {
         var utf8NoBom = new UTF8Encoding(false);
@@ -128,13 +140,18 @@ public sealed class RunShellTool : ITool
         if (OperatingSystem.IsWindows())
         {
             var shellExe = FindExecutableInPath("pwsh.exe") ?? "powershell.exe";
-            // Force UTF-8 output & error encoding inside PowerShell so Chinese/Unicode never garbles
+            var psEscapedDir = workingDir.Replace("'", "''");
+
+            // Force UTF-8 I/O AND sync both PowerShell $PWD and .NET [Environment]::CurrentDirectory
+            // so [IO.File]::WriteAllText('foo.html', ...) always lands inside WorkspacePath!
             var wrappedScript =
                 "$Utf8NoBom = [System.Text.UTF8Encoding]::new($false); " +
                 "[Console]::InputEncoding = $Utf8NoBom; " +
                 "[Console]::OutputEncoding = $Utf8NoBom; " +
                 "$OutputEncoding = $Utf8NoBom; " +
                 "$ProgressPreference = 'SilentlyContinue'; " +
+                $"Set-Location -LiteralPath '{psEscapedDir}'; " +
+                "[System.Environment]::CurrentDirectory = (Get-Location -PSProvider FileSystem).ProviderPath; " +
                 command;
 
             var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(wrappedScript));
@@ -154,6 +171,9 @@ public sealed class RunShellTool : ITool
         else
         {
             var shellExe = File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh";
+            var posixEscapedDir = workingDir.Replace("'", "'\"'\"'");
+            var wrappedPosix = $"cd '{posixEscapedDir}' && {command}";
+
             var psi = new ProcessStartInfo
             {
                 FileName = shellExe,
@@ -166,7 +186,7 @@ public sealed class RunShellTool : ITool
                 StandardErrorEncoding = utf8NoBom
             };
             psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add(command);
+            psi.ArgumentList.Add(wrappedPosix);
             return psi;
         }
     }

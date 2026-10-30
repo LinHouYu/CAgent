@@ -150,6 +150,33 @@ public sealed class CdpBridgeAndStreamTests : IDisposable
         Assert.Equal("来自 DOM 降级观察器的完整回复", reply);
     }
 
+    [Fact]
+    public async Task StartNewConversationAsync_ClicksNewChatButtonOverLoopbackCdp()
+    {
+        await using var mockCdp = new LoopbackMockCdpServer();
+        await mockCdp.StartAsync();
+
+        var configPath = Path.Combine(_tempDir, "config_newchat.json");
+        using var configSvc = new ConfigService(configPath);
+        var adapterMgr = new AdapterManager(Path.Combine(_tempDir, "adapters_newchat.json"));
+        var personalAccount = configSvc.Current.SwitchEdition(CopilotEdition.Personal);
+
+        await using var bridge = new CdpBrowserBridge(
+            configSvc,
+            adapterMgr,
+            customTargetProvider: (_, _) => Task.FromResult(new CdpTargetInfo
+            {
+                Id = "page-3",
+                Type = "page",
+                Url = "https://copilot.microsoft.com",
+                WebSocketDebuggerUrl = mockCdp.WebSocketUrl
+            }));
+
+        var snap = await bridge.StartNewConversationAsync(personalAccount);
+        Assert.Equal(BridgeConnectionState.Ready, snap.State);
+        Assert.True(mockCdp.NewChatButtonClicked);
+    }
+
     public void Dispose()
     {
         try
@@ -182,6 +209,7 @@ public sealed class CdpBridgeAndStreamTests : IDisposable
         public string WebSocketUrl { get; private set; } = string.Empty;
         public string LastInsertedText { get; private set; } = string.Empty;
         public bool DisableNetworkFrames { get; set; }
+        public bool NewChatButtonClicked { get; private set; }
 
         public Task StartAsync()
         {
@@ -335,8 +363,14 @@ public sealed class CdpBridgeAndStreamTests : IDisposable
             }
         }
 
-        private static object? HandleEvaluate(string expr, string? sessionId)
+        private object? HandleEvaluate(string expr, string? sessionId)
         {
+            if (expr.Contains("newChatEl.click()"))
+            {
+                NewChatButtonClicked = true;
+                return true;
+            }
+
             // Calibration promise
             if (expr.Contains("__cagent_calibrator_banner"))
             {

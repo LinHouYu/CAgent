@@ -13,12 +13,13 @@ public sealed class EditionAdapterRule
     public List<string> WebSocketUrlHints { get; set; } = [];
     public List<string> InputSelectorHints { get; set; } = [];
     public List<string> SendButtonHints { get; set; } = [];
+    public List<string> NewChatButtonHints { get; set; } = [];
     public List<string> FileInputHints { get; set; } = [];
 }
 
 public sealed class AdaptersDocument
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
     public List<EditionAdapterRule> Rules { get; set; } = [];
 }
 
@@ -96,6 +97,13 @@ public sealed class AdapterManager
                     {
                         foreach (var custom in doc.Rules)
                         {
+                            if (map.TryGetValue(custom.Edition, out var builtin))
+                            {
+                                if (custom.NewChatButtonHints is null || custom.NewChatButtonHints.Count == 0)
+                                {
+                                    custom.NewChatButtonHints = builtin.NewChatButtonHints;
+                                }
+                            }
                             map[custom.Edition] = custom;
                         }
                     }
@@ -112,7 +120,7 @@ public sealed class AdapterManager
 
     public static AdaptersDocument CreateBuiltInDefaults() => new()
     {
-        SchemaVersion = 1,
+        SchemaVersion = 2,
         Rules =
         [
             new EditionAdapterRule
@@ -145,6 +153,18 @@ public sealed class AdapterManager
                     "button[aria-label*='发送']",
                     "button[title*='Submit']",
                     "button[title*='发送']"
+                ],
+                NewChatButtonHints =
+                [
+                    "button[data-testid='new-chat-button']",
+                    "button[data-testid*='new-chat']",
+                    "button[aria-label*='New chat']",
+                    "button[aria-label*='新聊天']",
+                    "button[aria-label*='新对话']",
+                    "button[aria-label*='新建']",
+                    "button[title*='New chat']",
+                    "button[title*='新聊天']",
+                    "a[aria-label*='New chat']"
                 ],
                 FileInputHints =
                 [
@@ -185,6 +205,16 @@ public sealed class AdapterManager
                     "button[data-testid*='send']",
                     "button[title*='Send']",
                     "button[title*='发送']"
+                ],
+                NewChatButtonHints =
+                [
+                    "button[aria-label*='New chat']",
+                    "button[aria-label*='新建聊天']",
+                    "button[aria-label*='新聊天']",
+                    "button[aria-label*='开启新对话']",
+                    "button[data-testid*='new-chat']",
+                    "button[title*='New chat']",
+                    "button[title*='新建聊天']"
                 ],
                 FileInputHints =
                 [

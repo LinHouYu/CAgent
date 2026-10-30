@@ -42,8 +42,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ICommand ToggleThemeCommand { get; }
     public ICommand ToggleSettingsCommand { get; }
 
-    // Workspace & Chat Commands
+    // Workspace, Mode & Chat Commands
+    public ICommand StartNewChatCommand { get; }
     public ICommand BootstrapWorkspaceCommand { get; }
+    public ICommand SwitchToPlanModeCommand { get; }
+    public ICommand SwitchToExecuteModeCommand { get; }
     public ICommand SendPromptCommand { get; }
     public ICommand EmergencyStopCommand { get; }
     public ICommand ClearTimelineCommand { get; }
@@ -78,7 +81,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         ToggleThemeCommand = new RelayCommand(() => IsDarkMode = !IsDarkMode);
         ToggleSettingsCommand = new RelayCommand(() => IsSettingsExpanded = !IsSettingsExpanded);
 
-        BootstrapWorkspaceCommand = new RelayCommand(() => _ = BootstrapWorkspaceAsync());
+        StartNewChatCommand = new RelayCommand(() => _ = StartNewChatAsync());
+        BootstrapWorkspaceCommand = new RelayCommand(() => _ = StartNewChatAsync());
+        SwitchToPlanModeCommand = new RelayCommand(() => InteractionMode = AgentInteractionMode.Plan);
+        SwitchToExecuteModeCommand = new RelayCommand(() => InteractionMode = AgentInteractionMode.Execute);
         SendPromptCommand = new RelayCommand(() => _ = SendPromptAsync());
         EmergencyStopCommand = new RelayCommand(() => _orchestrator.EmergencyStop(ActiveAccount.Id));
         ClearTimelineCommand = new RelayCommand(() =>
@@ -86,6 +92,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             _orchestrator.ClearTimeline(ActiveAccount.Id);
             TimelineItems.Clear();
         });
+
+        _agentStatusText = string.IsNullOrWhiteSpace(_configService.Current.LastWorkspacePath)
+            ? "欢迎使用 CAgent — 请先选择「📁 本地工作目录」，再点击右上角「✨ 新建对话」"
+            : "就绪 — 点击右上角「✨ 新建对话」自动连接并发送系统提示词，或直接输入任务";
 
         _bridge.StatusChanged += OnBridgeStatusChanged;
         _orchestrator.EntryAdded += OnOrchestratorEntryAdded;
@@ -181,13 +191,37 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _configService.Current.LastWorkspacePath;
         set
         {
-            if (_configService.Current.LastWorkspacePath != value)
+            var sanitized = (value ?? string.Empty).Trim().Trim('"', '\'');
+            if (_configService.Current.LastWorkspacePath != sanitized)
             {
-                _configService.Update(cfg => cfg.LastWorkspacePath = value ?? string.Empty, saveImmediately: false);
+                _configService.Update(cfg => cfg.LastWorkspacePath = sanitized, saveImmediately: false);
                 OnPropertyChanged();
             }
         }
     }
+
+    public AgentInteractionMode InteractionMode
+    {
+        get => _configService.Current.InteractionMode;
+        set
+        {
+            if (_configService.Current.InteractionMode != value)
+            {
+                _configService.Update(cfg => cfg.InteractionMode = value, saveImmediately: false);
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsPlanMode));
+                OnPropertyChanged(nameof(IsExecuteMode));
+                OnPropertyChanged(nameof(ModeHintText));
+            }
+        }
+    }
+
+    public bool IsPlanMode => InteractionMode == AgentInteractionMode.Plan;
+    public bool IsExecuteMode => InteractionMode == AgentInteractionMode.Execute;
+
+    public string ModeHintText => IsExecuteMode
+        ? "⚡ 自动连续调用工具、分段读写与主动截图自检（类似 MCP）"
+        : "📋 仅允许只读查看，自动拦截修改文件与执行命令，安心讨论方案";
 
     public bool AutoApproveTools
     {
@@ -381,11 +415,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    public async Task BootstrapWorkspaceAsync()
+    public async Task StartNewChatAsync()
     {
+        if (!EnsureWorkspaceConfigured())
+        {
+            return;
+        }
+
         var account = ActiveAccount;
-        await _orchestrator.BootstrapWorkspaceAsync(account);
+        await _orchestrator.StartNewChatAsync(account);
     }
+
+    public Task BootstrapWorkspaceAsync() => StartNewChatAsync();
 
     public async Task SendPromptAsync()
     {
@@ -395,8 +436,38 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
+        if (!EnsureWorkspaceConfigured())
+        {
+            return;
+        }
+
         PromptInputText = string.Empty;
         await _orchestrator.SendUserTaskAsync(ActiveAccount, text);
+    }
+
+    private bool EnsureWorkspaceConfigured()
+    {
+        if (!string.IsNullOrWhiteSpace(WorkspacePath))
+        {
+            return true;
+        }
+
+        const string warn = "⚠️ 请先在上方「📁 本地工作目录」选择或粘贴目标文件夹路径，再新建对话或发送任务（防止代码误写入程序目录）！";
+        AgentStatusText = warn;
+
+        var noticeEntry = new TimelineEntry
+        {
+            AccountId = ActiveAccount.Id,
+            Kind = TimelineEntryKind.Error,
+            Title = "请先设置本地工作目录",
+            Content = warn
+        };
+        RunOnUi(() =>
+        {
+            TimelineItems.Add(CreateItemVm(noticeEntry));
+            TimelineChangedScrollRequested?.Invoke();
+        });
+        return false;
     }
 
     private void RefreshAccountsList()
