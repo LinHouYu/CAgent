@@ -1,0 +1,29 @@
+# .NET build & IDE artifacts
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+TestResults/
+publish/
+artifacts/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# CAgent local runtime workspace state
+.cagent/
+
+# Reference project (not part of CAgent repository)
+EAgent-main/
