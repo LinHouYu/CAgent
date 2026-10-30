@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="11.2.3" />
     <PackageReference Include="coverlet.collector" Version="6.0.2" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
@@ -22,6 +23,7 @@
     <ProjectReference Include="..\..\src\CAgent.Core\CAgent.Core.csproj" />
     <ProjectReference Include="..\..\src\CAgent.Bridge.Cdp\CAgent.Bridge.Cdp.csproj" />
     <ProjectReference Include="..\..\src\CAgent.Tools\CAgent.Tools.csproj" />
+    <ProjectReference Include="..\..\src\CAgent.Desktop\CAgent.Desktop.csproj" />
   </ItemGroup>
 
 </Project>

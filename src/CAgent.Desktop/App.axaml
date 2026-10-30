@@ -1,0 +1,79 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="CAgent.Desktop.App"
+             RequestedThemeVariant="Dark">
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="AppBgBrush" Color="#0B1120" />
+                    <SolidColorBrush x:Key="SurfaceBgBrush" Color="#111827" />
+                    <SolidColorBrush x:Key="ElevatedBgBrush" Color="#1E293B" />
+                    <SolidColorBrush x:Key="SubtleBorderBrush" Color="#293548" />
+                    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#F8FAFC" />
+                    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#94A3B8" />
+                    <SolidColorBrush x:Key="AccentPrimaryBrush" Color="#2563EB" />
+                    <SolidColorBrush x:Key="AccentHighlightBrush" Color="#38BDF8" />
+                    <SolidColorBrush x:Key="SuccessBrush" Color="#10B981" />
+                    <SolidColorBrush x:Key="DangerBrush" Color="#EF4444" />
+                    <SolidColorBrush x:Key="ToolCardBgBrush" Color="#0F172A" />
+                </ResourceDictionary>
+
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="AppBgBrush" Color="#F1F5F9" />
+                    <SolidColorBrush x:Key="SurfaceBgBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="ElevatedBgBrush" Color="#E2E8F0" />
+                    <SolidColorBrush x:Key="SubtleBorderBrush" Color="#CBD5E1" />
+                    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#0F172A" />
+                    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#475569" />
+                    <SolidColorBrush x:Key="AccentPrimaryBrush" Color="#2563EB" />
+                    <SolidColorBrush x:Key="AccentHighlightBrush" Color="#0284C7" />
+                    <SolidColorBrush x:Key="SuccessBrush" Color="#059669" />
+                    <SolidColorBrush x:Key="DangerBrush" Color="#DC2626" />
+                    <SolidColorBrush x:Key="ToolCardBgBrush" Color="#F8FAFC" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+        <Style Selector="Button.pill">
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="{DynamicResource AccentPrimaryBrush}" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.danger">
+            <Setter Property="Background" Value="{DynamicResource DangerBrush}" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+        <Style Selector="Button.success">
+            <Setter Property="Background" Value="{DynamicResource SuccessBrush}" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="ToggleButton.segment">
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="Padding" Value="14,6" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="ToggleButton.segment:checked /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AccentPrimaryBrush}" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+        </Style>
+    </Application.Styles>
+</Application>

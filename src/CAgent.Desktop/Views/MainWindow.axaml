@@ -1,0 +1,385 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:CAgent.Desktop.ViewModels"
+        x:Class="CAgent.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="CAgent — Microsoft Copilot 电脑操控代理"
+        Width="1040"
+        Height="740"
+        MinWidth="760"
+        MinHeight="520"
+        FontFamily="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif"
+        Background="{DynamicResource AppBgBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto" Margin="16">
+
+        <!-- 1. Top Navigation Card: Row A (Edition & Multi-Account + Theme/Settings), Row B (Status & Browser Actions) -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource SurfaceBgBrush}"
+                BorderBrush="{DynamicResource SubtleBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                Padding="14,10">
+            <StackPanel Spacing="10">
+                <!-- Row A: Brand + Edition Switcher + Multi-Account + Settings/Theme -->
+                <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <Border Background="{DynamicResource AccentPrimaryBrush}"
+                                CornerRadius="8"
+                                Padding="10,5"
+                                VerticalAlignment="Center">
+                            <TextBlock Text="CAgent"
+                                       Foreground="#FFFFFF"
+                                       FontWeight="Bold"
+                                       FontSize="15" />
+                        </Border>
+
+                        <Border Background="{DynamicResource ElevatedBgBrush}"
+                                CornerRadius="9"
+                                Padding="3">
+                            <StackPanel Orientation="Horizontal" Spacing="2">
+                                <ToggleButton x:Name="PersonalEditionButton"
+                                              Classes="segment"
+                                              Content="个人版 Copilot"
+                                              IsChecked="{Binding IsPersonalEditionActive, Mode=OneWay}"
+                                              Command="{Binding SwitchToPersonalCommand}" />
+                                <ToggleButton x:Name="WorkEditionButton"
+                                              Classes="segment"
+                                              Content="工作版 M365"
+                                              IsChecked="{Binding IsWorkEditionActive, Mode=OneWay}"
+                                              Command="{Binding SwitchToWorkCommand}" />
+                            </StackPanel>
+                        </Border>
+
+                        <ComboBox x:Name="AccountSelectorCombo"
+                                  ItemsSource="{Binding Accounts}"
+                                  SelectedItem="{Binding SelectedAccount}"
+                                  MinWidth="205"
+                                  CornerRadius="8">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:AccountItemViewModel">
+                                    <TextBlock Text="{Binding FullLabel}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+
+                        <Button x:Name="OpenAddAccountButton"
+                                Classes="pill"
+                                Content="+ 添加账号"
+                                Command="{Binding ToggleAddAccountPanelCommand}" />
+
+                        <Button x:Name="RemoveAccountButton"
+                                Classes="pill"
+                                Content="删除账号"
+                                IsVisible="{Binding CanRemoveCurrentAccount}"
+                                Command="{Binding RemoveCurrentAccountCommand}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Button x:Name="SettingsToggleButton"
+                                Classes="pill"
+                                Content="⚙️ 设置"
+                                Command="{Binding ToggleSettingsCommand}" />
+                        <Button x:Name="ThemeToggleButton"
+                                Classes="pill"
+                                Content="{Binding ThemeButtonText}"
+                                Command="{Binding ToggleThemeCommand}" />
+                    </StackPanel>
+                </Grid>
+
+                <Border Height="1" Background="{DynamicResource SubtleBorderBrush}" />
+
+                <!-- Row B: Live Connection Status + Browser Launch / Self-Heal Calibrate / Session Bootstrap -->
+                <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Border Background="{DynamicResource ElevatedBgBrush}"
+                                CornerRadius="999"
+                                Padding="12,5">
+                            <TextBlock Text="{Binding ConnectionStatusText}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AccentHighlightBrush}"
+                                       TextTrimming="CharacterEllipsis" />
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Button x:Name="ConnectBrowserButton"
+                                Classes="primary"
+                                Content="🌐 启动 / 连接浏览器"
+                                Command="{Binding ConnectBrowserCommand}" />
+                        <Button x:Name="CalibrateButton"
+                                Classes="pill"
+                                Content="🎯 校准输入框"
+                                ToolTip.Tip="若网页改版导致找不到输入框，点击此按钮并在浏览器输入框单击一次即可自愈"
+                                Command="{Binding CalibrateInputCommand}" />
+                        <Button x:Name="BootstrapButton"
+                                Classes="primary"
+                                Content="🚀 注入工作区并开始新会话"
+                                Command="{Binding BootstrapWorkspaceCommand}" />
+                        <Button Classes="pill"
+                                Content="清空视图"
+                                Command="{Binding ClearTimelineCommand}" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- 1b. Inline Add-Account Drawer -->
+        <Border Grid.Row="1"
+                IsVisible="{Binding IsAddAccountPanelOpen}"
+                Background="{DynamicResource SurfaceBgBrush}"
+                BorderBrush="{DynamicResource AccentHighlightBrush}"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="14,10"
+                Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <TextBlock Text="新增独立浏览器会话账号：" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBox x:Name="NewAccountNameTextBox"
+                         Width="220"
+                         Watermark="账号备注名（如：公司研发号）"
+                         Text="{Binding NewAccountName}" />
+                <CheckBox x:Name="NewAccountIsWorkCheckBox"
+                          Content="设为工作版 (M365 企业号)"
+                          IsChecked="{Binding NewAccountIsWork}" />
+                <Button x:Name="ConfirmAddAccountButton"
+                        Classes="primary"
+                        Content="确认创建"
+                        Command="{Binding ConfirmAddAccountCommand}" />
+                <Button Classes="pill"
+                        Content="取消"
+                        Command="{Binding CancelAddAccountCommand}" />
+            </StackPanel>
+        </Border>
+
+        <!-- 2. Workspace Bar & Collapsible Settings Panel -->
+        <StackPanel Grid.Row="2" Spacing="8" Margin="0,10,0,0">
+            <Border Background="{DynamicResource SurfaceBgBrush}"
+                    BorderBrush="{DynamicResource SubtleBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="12,8">
+                <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+                    <TextBlock Grid.Column="0"
+                               Text="📁 本地工作目录："
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0" />
+                    <TextBox x:Name="WorkspacePathTextBox"
+                             Grid.Column="1"
+                             Text="{Binding WorkspacePath}"
+                             Watermark="选择或输入允许 Copilot 操控的本地文件夹路径..."
+                             CornerRadius="7" />
+                    <Button x:Name="BrowseWorkspaceButton"
+                            Grid.Column="2"
+                            Classes="pill"
+                            Content="浏览文件夹..."
+                            Margin="8,0,0,0"
+                            Click="OnBrowseWorkspaceClicked" />
+                </Grid>
+            </Border>
+
+            <!-- Collapsible Safety Guardrails & Persistence Settings -->
+            <Border x:Name="SettingsDrawerBorder"
+                    IsVisible="{Binding IsSettingsExpanded}"
+                    Background="{DynamicResource SurfaceBgBrush}"
+                    BorderBrush="{DynamicResource SubtleBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="16,12">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="安全护栏与防风控参数（所有修改自动保存至 config.json，下次启动自动还原）"
+                               FontWeight="Bold"
+                               Foreground="{DynamicResource AccentHighlightBrush}" />
+
+                    <WrapPanel Orientation="Horizontal">
+                        <CheckBox x:Name="AutoApproveCheckBox"
+                                  Content="允许自动连续执行工具（关闭时每次命令均需人工确认）"
+                                  IsChecked="{Binding AutoApproveTools}"
+                                  Margin="0,0,24,8" />
+
+                        <CheckBox x:Name="EnterToSendCheckBox"
+                                  Content="按 Enter 直接发送消息（Shift+Enter 换行）"
+                                  IsChecked="{Binding EnterToSend}"
+                                  Margin="0,0,24,8" />
+                    </WrapPanel>
+
+                    <WrapPanel Orientation="Horizontal">
+                        <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,20,6" VerticalAlignment="Center">
+                            <TextBlock Text="单轮最大自动步数:" VerticalAlignment="Center" />
+                            <NumericUpDown Width="115" Minimum="1" Maximum="100" Value="{Binding MaxAutoSteps}" FormatString="0" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,20,6" VerticalAlignment="Center">
+                            <TextBlock Text="最小延迟(ms):" VerticalAlignment="Center" />
+                            <NumericUpDown Width="125" Minimum="0" Maximum="60000" Increment="500" Value="{Binding DelayMinMs}" FormatString="0" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,20,6" VerticalAlignment="Center">
+                            <TextBlock Text="最大延迟(ms):" VerticalAlignment="Center" />
+                            <NumericUpDown Width="125" Minimum="0" Maximum="120000" Increment="500" Value="{Binding DelayMaxMs}" FormatString="0" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,20,6" VerticalAlignment="Center">
+                            <TextBlock Text="单次字符上限:" VerticalAlignment="Center" />
+                            <NumericUpDown Width="130" Minimum="800" Maximum="32000" Increment="500" Value="{Binding MaxPromptChars}" FormatString="0" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,6" VerticalAlignment="Center">
+                            <TextBlock Text="命令超时(秒):" VerticalAlignment="Center" />
+                            <NumericUpDown Width="115" Minimum="5" Maximum="600" Increment="10" Value="{Binding CommandTimeoutSec}" FormatString="0" />
+                        </StackPanel>
+                    </WrapPanel>
+
+                    <Grid ColumnDefinitions="Auto,*">
+                        <TextBlock Grid.Column="0"
+                                   Text="自定义浏览器路径 (可选)："
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0" />
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding CustomBrowserExecutablePath}"
+                                 Watermark="默认自动探测系统中的 Microsoft Edge / Google Chrome" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <!-- 3. Main Conversation & Tool Execution Timeline -->
+        <Border Grid.Row="3"
+                Background="{DynamicResource SurfaceBgBrush}"
+                BorderBrush="{DynamicResource SubtleBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                Margin="0,10,0,10"
+                Padding="12">
+            <ScrollViewer x:Name="TimelineScrollViewer" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding TimelineItems}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:TimelineItemViewModel">
+                            <Border Background="{DynamicResource ToolCardBgBrush}"
+                                    BorderBrush="{DynamicResource SubtleBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Padding="14,10"
+                                    Margin="0,0,0,10">
+                                <StackPanel Spacing="6">
+                                    <!-- Header row -->
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                                        <Border Grid.Column="0"
+                                                Background="{DynamicResource ElevatedBgBrush}"
+                                                CornerRadius="5"
+                                                Padding="7,2"
+                                                Margin="0,0,8,0">
+                                            <TextBlock Text="{Binding KindLabel}"
+                                                       FontSize="11"
+                                                       FontWeight="Bold"
+                                                       Foreground="{DynamicResource AccentHighlightBrush}" />
+                                        </Border>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Title}"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding StatusBadgeText}"
+                                                   IsVisible="{Binding IsToolCall}"
+                                                   Margin="10,0"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource AccentHighlightBrush}"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding TimestampText}"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <!-- Message / Tool Payload Body -->
+                                    <SelectableTextBlock Text="{Binding Content}"
+                                                         TextWrapping="Wrap"
+                                                         FontFamily="Cascadia Mono, Consolas, Menlo, monospace"
+                                                         FontSize="13"
+                                                         LineHeight="20" />
+
+                                    <!-- Interactive Tool Approval Action Bar -->
+                                    <StackPanel Orientation="Horizontal"
+                                                Spacing="10"
+                                                Margin="0,6,0,0"
+                                                IsVisible="{Binding IsPendingApproval}">
+                                        <Button Classes="success"
+                                                Content="✓ 允许执行此命令"
+                                                Command="{Binding ApproveCommand}" />
+                                        <Button Classes="danger"
+                                                Content="✕ 拒绝执行"
+                                                Command="{Binding RejectCommand}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+
+        <!-- 4. Bottom Task Input Composer & Emergency Stop -->
+        <Border Grid.Row="4"
+                Background="{DynamicResource SurfaceBgBrush}"
+                BorderBrush="{DynamicResource SubtleBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                Padding="12">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+                <TextBox x:Name="PromptInputTextBox"
+                         Grid.Column="0"
+                         Text="{Binding PromptInputText}"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         MinHeight="56"
+                         MaxHeight="130"
+                         CornerRadius="8"
+                         Watermark="在这里向 Copilot 发送操控任务（例如：帮我整理当前文件夹下的文档，或编写脚本统计代码行数）..."
+                         KeyDown="OnPromptInputKeyDown" />
+
+                <Button x:Name="SendTaskButton"
+                        Grid.Column="1"
+                        Classes="primary"
+                        Content="发送指令 ↵"
+                        Margin="10,0,0,0"
+                        VerticalAlignment="Stretch"
+                        VerticalContentAlignment="Center"
+                        Command="{Binding SendPromptCommand}" />
+
+                <Button x:Name="EmergencyStopButton"
+                        Grid.Column="2"
+                        Classes="danger"
+                        Content="⏹ 一键急停"
+                        Margin="10,0,0,0"
+                        VerticalAlignment="Stretch"
+                        VerticalContentAlignment="Center"
+                        Command="{Binding EmergencyStopCommand}" />
+            </Grid>
+        </Border>
+
+        <!-- 5. Status Footer -->
+        <Grid Grid.Row="5" ColumnDefinitions="*,Auto" Margin="4,8,4,0">
+            <TextBlock Grid.Column="0"
+                       Text="{Binding AgentStatusText}"
+                       FontSize="12"
+                       Foreground="{DynamicResource SecondaryTextBrush}" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="{Binding ActiveEditionLabel}"
+                           FontSize="12"
+                           Foreground="{DynamicResource SecondaryTextBrush}" />
+                <TextBlock Text="· 累计调用工具:"
+                           FontSize="12"
+                           Foreground="{DynamicResource SecondaryTextBrush}" />
+                <TextBlock Text="{Binding TotalToolCallsCount}"
+                           FontSize="12"
+                           FontWeight="Bold"
+                           Foreground="{DynamicResource AccentHighlightBrush}" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
